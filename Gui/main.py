@@ -1,53 +1,36 @@
-import code
+#!/usr/bin/env python
+"""Contains a model to predict premier league soccer games after the half time
+
+This model is built using LSTM layers and one dense layer before the 
+softmax output layer.
+
+*tensorflow == "2.2.0"
+*pandas == "1.5.0"
+*numpy="1.23.3"
+"""
+
 from PIL import Image, ImageTk
 import tkinter as tk
 import pandas as pd
 import numpy as np
-from tensorflow.keras.layers import Dense, Dropout, LSTM
+from tensorflow.keras.layers import Dense, Dropout
 from tensorflow import keras
 import os
 from tkinter import messagebox
-
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
-# codecs = ['ascii', 'big5', 'big5hkscs', 'cp037', 'cp273', 'cp424', 'cp437', 'cp500', 'cp720', 'cp737', 'cp775', 'cp850', 'cp852', 'cp855',
-#           'cp856', 'cp857', 'cp858', 'cp860', 'cp861', 'cp862', 'cp863', 'cp864', 'cp865', 'cp866', 'cp869', 'cp874', 'cp875', 'cp932', 'cp949',
-#           'cp950', 'cp1006', 'cp1026', 'cp1125', 'cp1140', 'cp1250', 'cp1251', 'cp1252', 'cp1253', 'cp1254', 'cp1255', 'cp1256', 'cp1257', 'cp1258',
-#           'euc_jp', 'euc_jis_2004', 'euc_jisx0213', 'euc_kr', 'gb2312', 'gbk', 'gb18030', 'hz', 'iso2022_jp', 'iso2022_jp_1', 'iso2022_jp_2',
-#           'iso2022_jp_2004', 'iso2022_jp_3', 'iso2022_jp_ext', 'iso2022_kr', 'latin_1', 'iso8859_2', 'iso8859_3', 'iso8859_4', 'iso8859_5', 'iso8859_6',
-#           'iso8859_7', 'iso8859_8', 'iso8859_9', 'iso8859_10', 'iso8859_11', 'iso8859_13', 'iso8859_14', 'iso8859_15', 'iso8859_16', 'johab', 'koi8_r', 'koi8_t',
-#           'koi8_u', 'kz1048', 'mac_cyrillic', 'mac_greek', 'mac_iceland', 'mac_latin2', 'mac_roman', 'mac_turkish', 'ptcp154', 'shift_jis', 'shift_jis_2004',
-#           'shift_jisx0213', 'utf_32', 'utf_32_be', 'utf_32_le', 'utf_16', 'utf_16_be', 'utf_16_le', 'utf_7', 'utf_8', 'utf_8_sig']
-
-# for x in range(len(codecs)):
-#     try:
-#         data = pd.read_csv(
-#             "Premier League Predict/Gui/final_dataset.csv", encoding=codecs[x]
-#         )
-#         print("\nThis is the right codec ", codecs[x])
-#     except:
-#         print("the codec is not it ", codecs[x])
-
+# Reading the dataset
 data = pd.read_csv(
-    "Premier League Predict/Gui/final_dataset.csv", encoding="ISO-8859–1"
+    "Non gui/data/final_dataset.csv", encoding="ISO-8859–1"
 )
-print(data)
-data = data[
-    [
-        "HomeTeam",
-        "AwayTeam",
-        "HTHG",
-        "HTAG",
-        "FTR",
-        "HS",
-        "AS",
-        "HST",
-        "AST",
-        "HF",
-        "AF",
-    ]
-]
+m = 7000
 
+# Parsing the y value from string to integer
+results = data["FTR"][:7000].to_numpy()
+results = np.where(results == "H", 0, results)
+results = np.where(results == "D", 1, results)
+results = np.where(results == "A", 2, results)
+results = np.asarray(results).astype(np.int64)
+
+# Assigning integers for each team in the dataset
 team_name_mapping = {k: v for (k, v) in enumerate(data["HomeTeam"].unique())}
 teams = data["HomeTeam"].unique()
 
@@ -55,160 +38,68 @@ home_team_in_num = []
 for team in data["HomeTeam"]:
     for i in range(len(team_name_mapping.keys())):
         if team == team_name_mapping[i]:
-            values = list(team_name_mapping.values())
-            home_team_in_num.append(values.index(team))
+            home_team_in_num.append(np.where(teams == team)[0][0])
 
 away_team_in_num = []
 for team in data["AwayTeam"]:
     for i in range(len(team_name_mapping.keys())):
         if team == team_name_mapping[i]:
-            values = list(team_name_mapping.values())
-            away_team_in_num.append(values.index(team))
+            away_team_in_num.append(np.where(teams == team)[0][0])
 
-matches = []
-for (
-    home_team,
-    away_team,
-    half_time_home_goals,
-    half_time_away_goals,
-    home_shot,
-    away_shot,
-    home_shot_target,
-    away_shot_target,
-    home_fouls,
-    away_fouls,
-) in zip(
-    home_team_in_num,
-    away_team_in_num,
-    data["HTHG"],
-    data["HTAG"],
-    data["HS"],
-    data["AS"],
-    data["HST"],
-    data["AST"],
-    data["HF"],
-    data["AF"],
-):
-    matches.append(
-        [
-            [home_team, away_team],
-            [half_time_home_goals, half_time_away_goals],
-            [home_shot, away_shot],
-            [home_shot_target, away_shot_target],
-            [home_fouls, away_fouls],
-        ]
-    )
+# Converting to numpy array, and concatenating teams with the other x values
+home_team = np.array(home_team_in_num, dtype=np.int8).reshape(m, 1)
+away_team = np.array(away_team_in_num, dtype=np.int8).reshape(m, 1)
+partial_data = data[
+    [
+        "HTHG",
+        "HTAG",
+        "HS",
+        "AS",
+        "HST",
+        "AST",
+        "HF",
+        "AF",
+    ]
+].to_numpy()
 
-results = []
-for result in data["FTR"]:
-    if result == "H":
-        results.append(0)
-    elif result == "D":
-        results.append(1)
-    elif result == "A":
-        results.append(2)
+data = np.concatenate((home_team, away_team, partial_data[:7000]), axis=1)
+data = np.where(data == None, 0, data)
+data = np.asarray(data).astype(np.float32)
 
-results = np.array(results, np.int8)
-matches = np.array(matches, np.int32)
+# Splitting the data and converting from np array to tensor
+x_train = tf.convert_to_tensor(data[:6950].reshape(6950, 5, 2))
+x_test = tf.convert_to_tensor(data[6950:].reshape(50, 5, 2))
+y_train = tf.convert_to_tensor(results[:6950])
+y_test = tf.convert_to_tensor(results[6950:])
 
-x_train = np.array(matches[:6000], dtype=np.int32)
-x_test = np.array(matches[6000:], dtype=np.int32)
-y_train = np.array(results[:6000], dtype=np.int32)
-y_test = np.array(results[6000:], dtype=np.int32)
+# Configuring the model with 4 LSTM layers 4 Dropout layers and 2 Dense Layers
+# Dropout used to help with overfitting
+model = keras.models.Sequential()
+model.add(keras.layers.LSTM(
+    units=512, return_sequences=True, input_shape=(5, 2)))
+model.add(Dropout(0.2))
 
-# model = keras.models.Sequential()
-# model.add(keras.layers.LSTM(units=836, return_sequences=True, input_shape=(5, 2)))
-# model.add(Dropout(0.2))
+model.add(keras.layers.LSTM(units=256, return_sequences=True))
+model.add(Dropout(0.2))
 
-# model.add(keras.layers.LSTM(units=100, return_sequences=True))
-# model.add(Dropout(0.2))
+model.add(keras.layers.LSTM(units=256, return_sequences=True))
+model.add(Dropout(0.2))
 
-# model.add(keras.layers.LSTM(units=100, return_sequences=True))
-# model.add(Dropout(0.2))
+model.add(keras.layers.LSTM(units=128))
+model.add(Dropout(0.2))
+model.add(Dense(64, activation="relu"))
+model.add(Dense(3, activation="softmax"))
 
-# model.add(keras.layers.LSTM(units=100))
-# model.add(Dropout(0.2))
-# model.add(Dense(3, activation="softmax"))
+# Setting the optimizer, loss function, and metric
+model.compile(
+    optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
+)
 
-# nadam = keras.optimizers.Nadam(lr=0.0001)
-# model.compile(
-#     optimizer=nadam, loss="sparse_categorical_crossentropy", metrics=["accuracy"]
-# )
-
-# model.fit(x_train, y_train, epochs=10)
-
-model = keras.models.load_model("premier_league.h5")
-# print("\nAvilable Teams To Pick From: ", end="")
-# for team in teams:
-#     print("\n", team)
-
-# reverse_team = {}
-# for k, v in team_name_mapping.items():
-#     reverse_team[v] = k
-
-# print("")
-# home_team = input("Home Team: ")
-# away_team = input("Away Team: ")
-# home_team = reverse_team[home_team]
-# away_team = reverse_team[away_team]
-
-
-# half_time_home_goals = input("Half Time Home Goals: ")
-# half_time_away_goals = input("Half Time Away Goals: ")
-# if half_time_home_goals.isalpha() or half_time_away_goals.isalpha():
-#     half_time_home_goals = int(half_time_home_goals)
-#     half_time_away_goals = int(half_time_away_goals)
-# else:
-#     exit(1)
-
-# home_shots = input("Home Shots: ")
-# away_shots = input("Away Shots: ")
-# if home_shots.isalpha() or away_shots.isalpha():
-#     home_shots = int(home_shots)
-#     away_shots = int(away_shots)
-# else:
-#     exit(1)
-
-# home_shots_target = input("Home Shots On Target: ")
-# away_shots_target = input("Away Shots On Target: ")
-# if home_shots_target.isalpha() or away_shots_target.isalpha():
-#     home_shots_target = int(home_shots_target)
-#     away_shots_target = int(away_shots_target)
-# else:
-#     exit(1)
-
-# home_fouls = input("Fouls done by home side: ")
-# away_fouls = input("Fouls done by away side: ")
-# if home_fouls.isalpha() or away_fouls.isalpha():
-#     home_fouls = int(home_fouls)
-#     away_fouls = int(away_fouls)
-# else:
-#     exit(1)
-
-# predictions = model.predict(
-#     [
-#         [
-#             [home_team, away_team],
-#             [half_time_home_goals, half_time_away_goals],
-#             [home_shots, away_shots],
-#             [home_shots_target, away_shots_target],
-#             [home_fouls, away_fouls],
-#         ]
-#     ]
-# )
-
-# results = ["Home Win", "Draw", "Away Win"]
-# predictions = predictions[0]
-
-# index = np.argmax(predictions)
-
-# result = ""
-# if results[index] == 0:
-#     result = team_name_mapping[home_team]
-# elif results[index] == 1:
-#     result = "Draw"
-# else:
-#     result = team_name_mapping[away_team]
+# Fitting the model with the training data, and printing the accuracy when used with the test set
+model.fit(x_train, y_train, epochs=5)
+print(model.evaluate(x_test, y_test))
+print(model.summary())
+# model = keras.models.load_model("premier_league.h5")
 
 root = tk.Tk()
 
@@ -217,7 +108,7 @@ root.resizable(0, 0)
 root.title("Premier League Predictor")
 
 pilImage = Image.open(
-    "skysports-premier-league-graphic_4983467.jpg"
+    "Gui/skysports-premier-league-graphic_4983467.jpg"
 )
 pilImage = pilImage.resize((500, 200), Image.ANTIALIAS)
 image = ImageTk.PhotoImage(pilImage)

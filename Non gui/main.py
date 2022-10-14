@@ -1,32 +1,37 @@
+#!/usr/bin/env python
+"""Contains a model to predict premier league soccer games after the half time
+
+This model is built using LSTM layers and one dense layer before the 
+softmax output layer.
+
+*tensorflow == "2.2.0"
+*pandas == "1.5.0"
+*numpy="1.23.3"
+"""
+
+# Importing packages
+import time
+import tensorflow as tf
+from tensorflow.python.keras.layers.core import Dense, Dropout
+import pandas as pd
+import numpy as np
+from tensorflow import keras
 import os
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
-from tensorflow import keras
-import numpy as np
-import pandas as pd
-from tensorflow.python.keras.layers.core import Dense, Dropout
-import time
-
+# Reading the dataset
 data = pd.read_csv(
-    "Self Work\preimer_pridict\data\\final_dataset.csv", encoding="ISO-8859–1"
+    "Non gui/data/final_dataset.csv", encoding="ISO-8859–1"
 )
-data = data[
-    [
-        "HomeTeam",
-        "AwayTeam",
-        "HTHG",
-        "HTAG",
-        "FTR",
-        "HS",
-        "AS",
-        "HST",
-        "AST",
-        "HF",
-        "AF",
-    ]
-]
+m = 7000
 
+# Parsing the y value from string to integer
+results = data["FTR"][:7000].to_numpy()
+results = np.where(results == "H", 0, results)
+results = np.where(results == "D", 1, results)
+results = np.where(results == "A", 2, results)
+results = np.asarray(results).astype(np.int64)
+
+# Assigning integers for each team in the dataset
 team_name_mapping = {k: v for (k, v) in enumerate(data["HomeTeam"].unique())}
 teams = data["HomeTeam"].unique()
 
@@ -34,97 +39,77 @@ home_team_in_num = []
 for team in data["HomeTeam"]:
     for i in range(len(team_name_mapping.keys())):
         if team == team_name_mapping[i]:
-            values = list(team_name_mapping.values())
-            home_team_in_num.append(values.index(team))
+            home_team_in_num.append(np.where(teams == team)[0][0])
 
 away_team_in_num = []
 for team in data["AwayTeam"]:
     for i in range(len(team_name_mapping.keys())):
         if team == team_name_mapping[i]:
-            values = list(team_name_mapping.values())
-            away_team_in_num.append(values.index(team))
+            away_team_in_num.append(np.where(teams == team)[0][0])
 
-matches = []
-for (
-    home_team,
-    away_team,
-    half_time_home_goals,
-    half_time_away_goals,
-    home_shot,
-    away_shot,
-    home_shot_target,
-    away_shot_target,
-    home_fouls,
-    away_fouls,
-) in zip(
-    home_team_in_num,
-    away_team_in_num,
-    data["HTHG"],
-    data["HTAG"],
-    data["HS"],
-    data["AS"],
-    data["HST"],
-    data["AST"],
-    data["HF"],
-    data["AF"],
-):
-    matches.append(
-        [
-            [home_team, away_team],
-            [half_time_home_goals, half_time_away_goals],
-            [home_shot, away_shot],
-            [home_shot_target, away_shot_target],
-            [home_fouls, away_fouls],
-        ]
-    )
+# Converting to numpy array, and concatenating teams with the other x values
+home_team = np.array(home_team_in_num, dtype=np.int8).reshape(m, 1)
+away_team = np.array(away_team_in_num, dtype=np.int8).reshape(m, 1)
+partial_data = data[
+    [
+        "HTHG",
+        "HTAG",
+        "HS",
+        "AS",
+        "HST",
+        "AST",
+        "HF",
+        "AF",
+    ]
+].to_numpy()
 
-results = []
-for result in data["FTR"]:
-    if result == "H":
-        results.append(0)
-    elif result == "D":
-        results.append(1)
-    elif result == "A":
-        results.append(2)
+data = np.concatenate((home_team, away_team, partial_data[:7000]), axis=1)
+data = np.where(data == None, 0, data)
+data = np.asarray(data).astype(np.float32)
 
-results = np.array(results, np.int8)
-matches = np.array(matches, np.int32)
+# Splitting the data and converting from np array to tensor
+x_train = tf.convert_to_tensor(data[:6950].reshape(6950, 5, 2))
+x_test = tf.convert_to_tensor(data[6950:].reshape(50, 5, 2))
+y_train = tf.convert_to_tensor(results[:6950])
+y_test = tf.convert_to_tensor(results[6950:])
 
-x_train = np.array(matches[:6000], dtype=np.int32)
-x_test = np.array(matches[6000:], dtype=np.int32)
-y_train = np.array(results[:6000], dtype=np.int32)
-y_test = np.array(results[6000:], dtype=np.int32)
-
+# Configuring the model with 4 LSTM layers 4 Dropout layers and 2 Dense Layers
+# Dropout used to help with overfitting
 model = keras.models.Sequential()
-model.add(keras.layers.LSTM(units=836, return_sequences=True, input_shape=(5, 2)))
+model.add(keras.layers.LSTM(
+    units=512, return_sequences=True, input_shape=(5, 2)))
 model.add(Dropout(0.2))
 
-model.add(keras.layers.LSTM(units=100, return_sequences=True))
+model.add(keras.layers.LSTM(units=256, return_sequences=True))
 model.add(Dropout(0.2))
 
-model.add(keras.layers.LSTM(units=100, return_sequences=True))
+model.add(keras.layers.LSTM(units=256, return_sequences=True))
 model.add(Dropout(0.2))
 
-model.add(keras.layers.LSTM(units=100))
+model.add(keras.layers.LSTM(units=128))
 model.add(Dropout(0.2))
+model.add(Dense(64, activation="relu"))
 model.add(Dense(3, activation="softmax"))
 
-nadam = keras.optimizers.Nadam(lr=0.0001)
+# Setting the optimizer, loss function, and metric
 model.compile(
-    optimizer=nadam, loss="sparse_categorical_crossentropy", metrics=["accuracy"]
+    optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
 )
 
-model.fit(x_train, y_train, epochs=200)
+# Fitting the model with the training data, and printing the accuracy when used with the test set
+model.fit(x_train, y_train, epochs=5)
+print(model.evaluate(x_test, y_test))
+print(model.summary())
+# model.save("Self Work\preimer_pridict\premier_league.h5")
 
-model.save("Self Work\preimer_pridict\premier_league.h5")
 
+# Giving the user the teams to choose from
 print("\nAvilable Teams To Pick From: ", end="")
 for team in teams:
     print("\n", team)
 
-reverse_team = {}
-for k, v in team_name_mapping.items():
-    reverse_team[v] = k
+# Creating a reversed team_mapping to get the chosen clubs
+reverse_team = {v: k for k, v in team_name_mapping.items()}
 
 print("")
 home_team = input("Home Team: ")
@@ -132,7 +117,7 @@ away_team = input("Away Team: ")
 home_team = reverse_team[home_team]
 away_team = reverse_team[away_team]
 
-
+# Getting and validating the half time data from the user
 half_time_home_goals = input("Half Time Home Goals: ")
 half_time_away_goals = input("Half Time Away Goals: ")
 if half_time_home_goals.isdigit() or half_time_away_goals.isdigit():
@@ -165,6 +150,7 @@ if home_fouls.isdigit() or away_fouls.isdigit():
 else:
     exit(1)
 
+# Using the data provided by the user to predict a result
 predictions = model.predict(
     [
         [
@@ -182,6 +168,7 @@ predictions = predictions[0]
 
 index = np.argmax(predictions)
 
+# Outputting the result of the prediction
 if results[index] == 0:
     print("\n I Predict", team_name_mapping[home_team])
 elif results[index] == 1:
